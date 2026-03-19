@@ -2,7 +2,8 @@ pipeline {
     agent any
     
     environment {
-        GITHUB_TOKEN = credentials('GitHub-PAT-Token') // Make sure this credential exists in your EC2 Jenkins
+        GITHUB_TOKEN = credentials('GitHub-PAT-Token')
+        SLACK_WEBHOOK = credentials('slack-webhook-url') // Grabs the URL securely
         REPO_OWNER = 'adityatripathi5'
         REPO_NAME = 'java-devsecops-api'
     }
@@ -11,7 +12,6 @@ pipeline {
         stage('Dynamic Context Setup') {
             steps {
                 script {
-                    // This is exactly what your lead asked for. Jenkins dynamically figures out the context.
                     if (env.CHANGE_ID) {
                         echo " This is a PR RAISE! PR Number: ${env.CHANGE_ID}"
                         env.IS_PR = 'true'
@@ -27,14 +27,12 @@ pipeline {
 
         stage('Build Java API') {
             steps {
-                // Compiles the Java code to ensure it's not broken before scanning
                 sh 'mvn clean package -DskipTests'
             }
         }
 
         stage('Gitleaks Scan') {
             steps {
-                // Install Gitleaks on the fly on EC2
                 sh '''
                 wget https://github.com/gitleaks/gitleaks/releases/download/v8.18.1/gitleaks_8.18.1_linux_x64.tar.gz
                 tar -xzf gitleaks_8.18.1_linux_x64.tar.gz
@@ -51,6 +49,22 @@ pipeline {
         stage('Trivy & OWASP (Coming Next)') {
             steps {
                 echo "Gitleaks is wired dynamically. Next we will install Trivy, OWASP, and SonarQube CLI on the EC2."
+            }
+        }
+    }
+    
+    // THE NEW SLACK LOGIC
+    post {
+        success {
+            script {
+                // Only send to Slack if it is a PR MERGE / Direct Push to main
+                if (env.IS_PR == 'false' && env.BRANCH_NAME == 'main') {
+                    sh """
+                    curl -X POST -H 'Content-type: application/json' \
+                    --data '{"text":"✅ *PR Merged & Scanned Successfully!* \\nRepository: ${REPO_NAME} \\nBranch: ${BRANCH_NAME} \\nCommit: ${GIT_COMMIT_HASH}"}' \
+                    ${SLACK_WEBHOOK}
+                    """
+                }
             }
         }
     }
