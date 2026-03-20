@@ -25,9 +25,18 @@ pipeline {
             }
         }
 
-        stage('Build Java API') {
+        stage('Build & SonarQube Scan') {
             steps {
-                sh 'mvn clean package -DskipTests'
+                // This magically injects your URL and Token from Jenkins settings!
+                withSonarQubeEnv('sonar-server') {
+                    sh '''
+                    # We run clean, package, and the Sonar scanner all in one command
+                    mvn clean package sonar:sonar \
+                      -Dsonar.projectKey=java-devsecops-api \
+                      -Dsonar.projectName='java-devsecops-api' \
+                      -DskipTests
+                    '''
+                }
             }
         }
 
@@ -53,7 +62,6 @@ pipeline {
                 sh '''
                 trivy fs . --format sarif --output trivy-results.sarif || true
                 
-                # Upload SARIF to GitHub
                 if [ -f "trivy-results.sarif" ]; then
                     gzip -c trivy-results.sarif | base64 | tr -d '\n' > trivy-payload.b64
                     echo '{"commit_sha":"'$GIT_COMMIT_HASH'","ref":"refs/heads/'$BRANCH_NAME'","sarif":"' > trivy-req.json
@@ -76,10 +84,8 @@ pipeline {
         stage('OWASP Scan') {
             steps {
                 sh '''
-                # Run OWASP dynamically via Maven
                 mvn org.owasp:dependency-check-maven:check -Dformat=SARIF -DfailBuildOnCVSS=11 || true
                 
-                # Upload SARIF to GitHub
                 if [ -f "target/dependency-check-report.sarif" ]; then
                     gzip -c target/dependency-check-report.sarif | base64 | tr -d '\n' > owasp-payload.b64
                     echo '{"commit_sha":"'$GIT_COMMIT_HASH'","ref":"refs/heads/'$BRANCH_NAME'","sarif":"' > owasp-req.json
@@ -133,7 +139,7 @@ EOF
                     OWASP_VULNS=\$(grep -o '"ruleId":' target/dependency-check-report.sarif 2>/dev/null | wc -l | tr -d ' ' || echo "0")
 
                     curl -s -X POST -H 'Content-type: application/json' \
-                    --data '{"text":"✅ *PR Merged to Main!* \\n*Repository:* '"${REPO_NAME}"' \\n*Commit:* '"${GIT_COMMIT_HASH}"' \\n\\n��️ *Final Security Scan Results:* \\n• *Gitleaks:* '"\$GITLEAKS_LEAKS"' Secrets \\n• *Trivy:* '"\$TRIVY_VULNS"' Vulns \\n• *OWASP:* '"\$OWASP_VULNS"' Vulns"}' \
+                    --data '{"text":"✅ *PR Merged to Main!* \\n*Repository:* '"${REPO_NAME}"' \\n*Commit:* '"${GIT_COMMIT_HASH}"' \\n\\n🛡️ *Final Security Scan Results:* \\n• *Gitleaks:* '"\$GITLEAKS_LEAKS"' Secrets \\n• *Trivy:* '"\$TRIVY_VULNS"' Vulns \\n• *OWASP:* '"\$OWASP_VULNS"' Vulns"}' \
                     ${SLACK_WEBHOOK}
                     """
                 }
