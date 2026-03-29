@@ -4,6 +4,7 @@ pipeline {
     environment {
         GITHUB_TOKEN = credentials('GitHub-PAT-Token')
         SLACK_WEBHOOK = credentials('slack-webhook-url')
+        NVD_API_KEY = credentials('nvd-api-key') // <--- New NVD API Key added
         REPO_OWNER = 'adityatripathi5'
         REPO_NAME = 'java-devsecops-api'
     }
@@ -27,10 +28,8 @@ pipeline {
 
         stage('Build & SonarQube Scan') {
             steps {
-                // This magically injects your URL and Token from Jenkins settings!
                 withSonarQubeEnv('sonar-server') {
                     sh '''
-                    # We run clean, package, and the Sonar scanner all in one command
                     mvn clean package sonar:sonar \
                       -Dsonar.projectKey=java-devsecops-api \
                       -Dsonar.projectName='java-devsecops-api' \
@@ -84,7 +83,8 @@ pipeline {
         stage('OWASP Scan') {
             steps {
                 sh '''
-                mvn org.owasp:dependency-check-maven:check -Dformat=SARIF -DfailBuildOnCVSS=11 || true
+                # <--- Appended -DnvdApiKey=$NVD_API_KEY right here
+                mvn org.owasp:dependency-check-maven:check -Dformat=SARIF -DfailBuildOnCVSS=11 -DnvdApiKey=$NVD_API_KEY || true
                 
                 if [ -f "target/dependency-check-report.sarif" ]; then
                     gzip -c target/dependency-check-report.sarif | base64 | tr -d '\n' > owasp-payload.b64
